@@ -3,17 +3,15 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class Server {
-    private static final String PATH_FOLDER = "public";
-    private static final String SPECIAL_PAGE_1 = "/classic.html";
     private static final int DEFAULT_THREAD_COUNT = 64;
+    public static final String DEFAULT_HANDLER_KEY = "default";
     private final List<String> validPaths;
     private boolean stateOff = true;
     private final int port;
@@ -22,16 +20,23 @@ public class Server {
     private ServerSocket serverSocket;
     private ExecutorService executorService;
 
+    private final ConcurrentMap<String, ConcurrentMap<String, Handler>> handlers;
+
     public Server(int port, List<String> validPaths) {
         this.port = port;
         this.validPaths = validPaths;
         this.threadCount = DEFAULT_THREAD_COUNT;
+
+        handlers = new ConcurrentHashMap<>();
+
     }
 
     public Server(int port, List<String> validPaths, int threadCount) {
         this.validPaths = validPaths;
         this.port = port;
         this.threadCount = threadCount;
+
+        handlers = new ConcurrentHashMap<>();
     }
 
     public void start() {
@@ -55,87 +60,47 @@ public class Server {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-
     }
 
     private void run(ServerSocket serverSocket) {
         logger.log("Server started in thread " + Thread.currentThread().getName());
         while (!stateOff) {
             logger.log(Thread.currentThread().getName() + " waiting for connection ");
-            try (final var socket = serverSocket.accept();
-                 final var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                 final var out = new BufferedOutputStream(socket.getOutputStream())) {
+            try (final var socket = serverSocket.accept(); final var in = new BufferedReader(new InputStreamReader(socket.getInputStream())); final var out = new BufferedOutputStream(socket.getOutputStream())) {
                 // read only request line for simplicity
                 // must be in form GET /path HTTP/1.1
-                final var requestLine = in.readLine();
-                final var parts = requestLine.split(" ");
+                final var request = new Request(in.readLine());
+                logger.log("{\"Thread\":\"" + Thread.currentThread().getName() + "\", \"Request line\":\"" + request.getRequestLine() + "\"}");
 
-                logger.log("{\"Thread\":\"" + Thread.currentThread().getName() + "\", \"Request line\":\"" + requestLine + "\"}");
-
-                if (parts.length == 3) {
-                    final var path = parts[1];
-
-
-                    if (!validPaths.contains(path)) {
-                        sendResponse404(out);
-                        continue;
+                if (request.isCorrect() && validPaths.contains(request.getPath())) {
+                    if (handlers.containsKey(request.getMethod())) {
+                        ConcurrentMap<String, Handler> map = handlers.get(request.getMethod());
+                        Handler handler;
+                        if (map.containsKey(request.getPath())) {
+                            handler = map.get(request.getPath());
+                        } else {
+                            handler = map.get(DEFAULT_HANDLER_KEY);
+                        }
+                        handler.handle(request, out);
                     }
-
-                    // special case for classic
-                    if (path.equals(SPECIAL_PAGE_1)) {
-                        sendSpecialResponse1(out);
-                        continue;
-                    }
-                    sendResponse(path, out);
+                } else {
+                    sendResponse404(out);
                 }
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         }
-
     }
 
     private void sendResponse404(BufferedOutputStream out) throws IOException {
-        out.write((
-                "HTTP/1.1 404 Not Found\r\n" +
-                        "Content-Length: 0\r\n" +
-                        "Connection: close\r\n" +
-                        "\r\n"
-        ).getBytes());
+        out.write(("HTTP/1.1 404 Not Found\r\n" + "Content-Length: 0\r\n" + "Connection: close\r\n" + "\r\n").getBytes());
         out.flush();
     }
 
-    private void sendSpecialResponse1(BufferedOutputStream out) throws IOException {
-        final var filePath = Path.of(".", PATH_FOLDER, SPECIAL_PAGE_1);
-        final var mimeType = Files.probeContentType(filePath);
-        final var template = Files.readString(filePath);
-
-        final var content = template.replace("{time}", LocalDateTime.now().toString()).getBytes();
-
-        out.write((
-                "HTTP/1.1 200 OK\r\n" +
-                        "Content-Type: " + mimeType + "\r\n" +
-                        "Content-Length: " + content.length + "\r\n" +
-                        "Connection: close\r\n" +
-                        "\r\n"
-        ).getBytes());
-        out.write(content);
-        out.flush();
-    }
-
-    private void sendResponse(String path, BufferedOutputStream out) throws IOException {
-        final var filePath = Path.of(".", PATH_FOLDER, path);
-        final var mimeType = Files.probeContentType(filePath);
-
-        final var length = Files.size(filePath);
-        out.write((
-                "HTTP/1.1 200 OK\r\n" +
-                        "Content-Type: " + mimeType + "\r\n" +
-                        "Content-Length: " + length + "\r\n" +
-                        "Connection: close\r\n" +
-                        "\r\n"
-        ).getBytes());
-        Files.copy(filePath, out);
-        out.flush();
+    public void addHandler(String method, String path, Handler handler) {
+        validPaths.add(path);
+        ConcurrentMap<String, Handler> entity = new ConcurrentHashMap<>();
+        entity.put(path, handler);
+        handlers.put(method, entity);
     }
 }
