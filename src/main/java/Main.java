@@ -59,7 +59,7 @@ public class Main {
         server.start();
 
         try {
-            Thread.sleep(500000);
+            Thread.sleep(100000);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }

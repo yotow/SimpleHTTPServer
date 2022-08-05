@@ -6,8 +6,6 @@ public class Request {
     private final String[] partsOfRequest;
     private final String requestLine;
 
-    private  String requestBody;
-
     public Request(String requestLine) {
         this.requestLine = requestLine;
         this.partsOfRequest = requestLine.split(" ");

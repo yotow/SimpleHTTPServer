@@ -70,7 +70,8 @@ public class Server {
                 // read only request line for simplicity
                 // must be in form GET /path HTTP/1.1
                 final var request = new Request(in.readLine());
-                logger.log("{\"Thread\":\"" + Thread.currentThread().getName() + "\", \"Request line\":\"" + request.getRequestLine() + "\"}");
+                logger.log("{\"Thread\":\"" + Thread.currentThread().getName() + "\", \"Request line\":\""
+                        + request.getRequestLine() + "\"}");
 
                 if (request.isCorrect() && validPaths.contains(request.getPath())) {
                     if (handlers.containsKey(request.getMethod())) {
