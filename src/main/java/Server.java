@@ -1,7 +1,4 @@
-import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.ServerSocket;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -11,24 +8,26 @@ import java.util.concurrent.Executors;
 
 public class Server {
     private static final int DEFAULT_THREAD_COUNT = 64;
+    private final static int LIMIT_REQUEST_LINE_HEADERS = 4096;
     public static final String DEFAULT_HANDLER_KEY = "default";
     private final List<String> validPaths;
     private boolean stateOff = true;
     private final int port;
-    ILog logger = new ConsoleLog();
+    ILog logger = ConsoleLog.getLogger();
     private final int threadCount;
     private ServerSocket serverSocket;
     private ExecutorService executorService;
 
-    private final ConcurrentMap<String, ConcurrentMap<String, Handler>> handlers;
+    private final ConcurrentMap<String, Handler> getHandlers;
+    private final ConcurrentMap<String, Handler> postHandlers;
 
-    public Server(int port, List<String> validPaths) {
+      public Server(int port, List<String> validPaths) {
         this.port = port;
         this.validPaths = validPaths;
         this.threadCount = DEFAULT_THREAD_COUNT;
 
-        handlers = new ConcurrentHashMap<>();
-
+        getHandlers = new ConcurrentHashMap<>();
+        postHandlers = new ConcurrentHashMap<>();
     }
 
     public Server(int port, List<String> validPaths, int threadCount) {
@@ -36,7 +35,9 @@ public class Server {
         this.port = port;
         this.threadCount = threadCount;
 
-        handlers = new ConcurrentHashMap<>();
+        getHandlers = new ConcurrentHashMap<>();
+        postHandlers = new ConcurrentHashMap<>();
+
     }
 
     public void start() {
@@ -66,24 +67,14 @@ public class Server {
         logger.log("Server started in thread " + Thread.currentThread().getName());
         while (!stateOff) {
             logger.log(Thread.currentThread().getName() + " waiting for connection ");
-            try (final var socket = serverSocket.accept(); final var in = new BufferedReader(new InputStreamReader(socket.getInputStream())); final var out = new BufferedOutputStream(socket.getOutputStream())) {
-                // read only request line for simplicity
-                // must be in form GET /path HTTP/1.1
-                final var request = new Request(in.readLine());
-                logger.log("{\"Thread\":\"" + Thread.currentThread().getName() + "\", \"Request line\":\""
-                        + request.getRequestLine() + "\"}");
 
-                if (request.isCorrect() && validPaths.contains(request.getPath())) {
-                    if (handlers.containsKey(request.getMethod())) {
-                        ConcurrentMap<String, Handler> map = handlers.get(request.getMethod());
-                        Handler handler;
-                        if (map.containsKey(request.getPath())) {
-                            handler = map.get(request.getPath());
-                        } else {
-                            handler = map.get(DEFAULT_HANDLER_KEY);
-                        }
-                        handler.handle(request, out);
-                    }
+            try (final var socket = serverSocket.accept(); final var out = new BufferedOutputStream(socket.getOutputStream()); final var in = getBytes(socket.getInputStream())) {
+
+                final var request = new Request(in);
+                logger.log("{\"Thread\":\"" + Thread.currentThread().getName() + "\", \"Request line\":\"" + request.getRequestLine() + "\"}\n\n");
+
+                if (request.isValid() && validPaths.contains(request.getURI())) {
+                    sendResponse(out, request);
                 } else {
                     sendResponse404(out);
                 }
@@ -93,15 +84,53 @@ public class Server {
         }
     }
 
+    private void sendResponse(BufferedOutputStream out, Request request) {
+        var handlers = postHandlers;
+        if (request.getMethod().equals("GET")) {
+            handlers = getHandlers;
+        }
+
+        Handler handler;
+        if (handlers.containsKey(request.getURI())) {
+            handler = handlers.get(request.getURI());
+        } else {
+            handler = handlers.get(DEFAULT_HANDLER_KEY);
+        }
+        handler.handle(request, out);
+    }
+
     private void sendResponse404(BufferedOutputStream out) throws IOException {
         out.write(("HTTP/1.1 404 Not Found\r\n" + "Content-Length: 0\r\n" + "Connection: close\r\n" + "\r\n").getBytes());
         out.flush();
     }
 
     public void addHandler(String method, String path, Handler handler) {
+        var handlers = postHandlers;
+        if (method.equals("GET")) {
+            handlers = getHandlers;
+        }
         validPaths.add(path);
-        ConcurrentMap<String, Handler> entity = new ConcurrentHashMap<>();
-        entity.put(path, handler);
-        handlers.put(method, entity);
+        handlers.put(path, handler);
+    }
+
+    /**
+     * synchronized метод. Читает из socket.getInputStream() количество байт, равное LIMIT_REQUEST_LINE_HEADERS и
+     * помещает их в ByteArrayInputStream. Это сделано для параллельной обработки запросов.
+     * <p>
+     * Перехватывает все IOException и пишет в лог
+     *
+     * @param inputStream socket.getInputStream()
+     * @return ByteArrayInputStream
+     */
+    private synchronized ByteArrayInputStream getBytes(InputStream inputStream) throws IOException {
+        int totalLength;
+        logger.log(Thread.currentThread().getName() + " чтение запроса");
+        byte[] bytes = new byte[LIMIT_REQUEST_LINE_HEADERS];
+
+        final var in = new BufferedInputStream(inputStream);
+        in.mark(LIMIT_REQUEST_LINE_HEADERS);
+        totalLength = in.read(bytes);
+
+        return new ByteArrayInputStream(bytes, 0, totalLength);
     }
 }
