@@ -8,10 +8,18 @@
     <title>Document</title>
 </head>
 <body>
-<form action="http://localhost:9999/message.html?count=6&" method="GET">
+<form action="http://localhost:9999/message.html" method="GET">
     <h1>Непрочитанные сообщения</h1>
+    <input type="hidden" value="6" name="count">
     <p>{messages}</p>
     <button>обновить</button>
+</form>
+<form action="http://localhost:9999/message.html" method="POST" enctype="application/x-www-form-urlencoded">
+    <label for="name">Ваш ник</label>
+    <input id="name" name="name">
+    <label for="text">Текст сообщения</label>
+    <input id="text" name="text">
+    <button>Send</button>
 </form>
 <form action="http://localhost:9999/links.html" method="GET">
     <button>назад</button>

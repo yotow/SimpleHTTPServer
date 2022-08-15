@@ -1,4 +1,5 @@
 import java.util.LinkedList;
+import java.util.List;
 
 public class MessageRepository {
     private static final LinkedList<Message> messages = new LinkedList<>();
@@ -16,15 +17,13 @@ public class MessageRepository {
 
     }
 
-    public static String getMessages(int count) {
-        StringBuilder stringBuilder = new StringBuilder();
-        for (Message message : messages) {
-            stringBuilder.append(message.getSender()).append(":").append(message.getMessage()).append("\n");
-            count--;
-            if (count == 0) {
-                break;
-            }
-        }
-        return stringBuilder.toString();
+    public static List<Message> getMessages(int count) {
+        LinkedList<Message> res = new LinkedList<>();
+        messages.stream().limit(count).forEach(res::addFirst);
+        return res;
+    }
+
+    public static void setMessage(String name, String text){
+        messages.addFirst(new Message(name, text));
     }
 }

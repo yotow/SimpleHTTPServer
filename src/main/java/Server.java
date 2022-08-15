@@ -8,8 +8,8 @@ import java.util.concurrent.Executors;
 
 public class Server {
     private static final int DEFAULT_THREAD_COUNT = 64;
-    private final static int LIMIT_REQUEST_LINE_HEADERS = 4096;
     public static final String DEFAULT_HANDLER_KEY = "default";
+
     private final List<String> validPaths;
     private boolean stateOff = true;
     private final int port;
@@ -17,11 +17,10 @@ public class Server {
     private final int threadCount;
     private ServerSocket serverSocket;
     private ExecutorService executorService;
-
     private final ConcurrentMap<String, Handler> getHandlers;
     private final ConcurrentMap<String, Handler> postHandlers;
 
-      public Server(int port, List<String> validPaths) {
+    public Server(int port, List<String> validPaths) {
         this.port = port;
         this.validPaths = validPaths;
         this.threadCount = DEFAULT_THREAD_COUNT;
@@ -68,12 +67,12 @@ public class Server {
         while (!stateOff) {
             logger.log(Thread.currentThread().getName() + " waiting for connection ");
 
-            try (final var socket = serverSocket.accept(); final var out = new BufferedOutputStream(socket.getOutputStream()); final var in = getBytes(socket.getInputStream())) {
+            try (final var socket = serverSocket.accept();
+                 final var out = new BufferedOutputStream(socket.getOutputStream());
+                 final var in = new BufferedInputStream(socket.getInputStream())) {
 
                 final var request = new Request(in);
-                logger.log("{\"Thread\":\"" + Thread.currentThread().getName() + "\", \"Request line\":\"" + request.getRequestLine() + "\"}\n\n");
-
-                if (request.isValid() && validPaths.contains(request.getURI())) {
+                if (request.isValid() && validPaths.contains(request.getPath())) {
                     sendResponse(out, request);
                 } else {
                     sendResponse404(out);
@@ -91,8 +90,8 @@ public class Server {
         }
 
         Handler handler;
-        if (handlers.containsKey(request.getURI())) {
-            handler = handlers.get(request.getURI());
+        if (handlers.containsKey(request.getPath())) {
+            handler = handlers.get(request.getPath());
         } else {
             handler = handlers.get(DEFAULT_HANDLER_KEY);
         }
@@ -111,26 +110,5 @@ public class Server {
         }
         validPaths.add(path);
         handlers.put(path, handler);
-    }
-
-    /**
-     * synchronized метод. Читает из socket.getInputStream() количество байт, равное LIMIT_REQUEST_LINE_HEADERS и
-     * помещает их в ByteArrayInputStream. Это сделано для параллельной обработки запросов.
-     * <p>
-     * Перехватывает все IOException и пишет в лог
-     *
-     * @param inputStream socket.getInputStream()
-     * @return ByteArrayInputStream
-     */
-    private synchronized ByteArrayInputStream getBytes(InputStream inputStream) throws IOException {
-        int totalLength;
-        logger.log(Thread.currentThread().getName() + " чтение запроса");
-        byte[] bytes = new byte[LIMIT_REQUEST_LINE_HEADERS];
-
-        final var in = new BufferedInputStream(inputStream);
-        in.mark(LIMIT_REQUEST_LINE_HEADERS);
-        totalLength = in.read(bytes);
-
-        return new ByteArrayInputStream(bytes, 0, totalLength);
     }
 }
